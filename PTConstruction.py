@@ -10,7 +10,8 @@ class PTConstruction(NodeAlgorithm):
     default_params =    {'neighborsKey': 'Neighbors', 'sourceKey': 'source', 'myDistanceKey': 'myDistance', 'ackCountKey': 'ackCount', 
                         'iterationKey': 'iteration', 'pathLengthKey': 'pathLength', 'childrenKey': 'children', 'unvisitedKey': 'unvisited',
                         'parentKey': 'parent', 'childCountKey': 'childCount', 'weightKey':'weight', 'minPathKey': 'minPath', 'exitKey': 'exit',
-                        'myChoiceKey': 'myChoice', 'routingTableKey': 'routingTable'}
+                        'myChoiceKey': 'myChoice', 'routingTableKey': 'routingTable', 'masterKey': 'master', 'masterChildrenKey': 'masterChildren',
+                        'tokenNeighboursKey': 'tokenNeighbours', 'macroIterationKey': 'macroIteration', 'parentMasterKey': 'parentMaster'}
 
 
     def initializer(self):
@@ -21,7 +22,7 @@ class PTConstruction(NodeAlgorithm):
             v.memory[self.weightKey] = dict()
 
         for u,v,w in self.network.edges(data=True):
-            w = random.randint(0,10)
+            w = random.randint(1,10)
             u.memory[self.weightKey][v] = w
             v.memory[self.weightKey][u] = w
 
@@ -33,25 +34,37 @@ class PTConstruction(NodeAlgorithm):
             node.memory[self.exitKey] = None
             node.memory[self.myChoiceKey] = None
             node.memory[self.sourceKey] = False
+            node.memory[self.masterKey] = False
             node.memory[self.minPathKey] = float('inf')
             node.memory[self.routingTableKey] = dict()
+            node.memory[self.masterChildrenKey] = []
+            node.memory[self.tokenNeighboursKey] = []
+            node.memory[self.macroIterationKey] = 0
+            node.memory[self.parentMasterKey] = None
+            node.memory[self.parentKey] = None
  
             node.status = 'IDLE'
 
         ini_node.status = 'INITIATOR'
+        ini_node.memory[self.masterKey] = True
              
         self.network.outbox.insert(0, Message(header=NodeAlgorithm.INI,
                                                  destination=ini_node))
 
     def initiator(self, node, message):
         if message.header == NodeAlgorithm.INI:
-            node.memory[self.sourceKey] = True
+            print "--------------NOVA MAKROITERACIJA-------------"
+            node.memory[self.sourceKey] = True      
             node.memory[self.myDistanceKey] = 0
             node.memory[self.ackCountKey] = len(node.memory[self.neighborsKey])
             node.send(Message(header='Notify',
-                              destination=node.memory[self.neighborsKey]))
+                              destination=node.memory[self.neighborsKey],
+                              data=node.memory[self.macroIterationKey]))
 
         elif (message.header == 'Ack'):
+            print "INITIATOR___pocetak__________________________________"
+            print node.memory[self.childrenKey]
+            print node.memory
             node.memory[self.ackCountKey] -= 1
             if node.memory[self.ackCountKey] == 0:
                 node.memory[self.iterationKey] = 1
@@ -65,7 +78,11 @@ class PTConstruction(NodeAlgorithm):
                                   destination=node.memory[self.childrenKey],
                                   data=[node.memory[self.iterationKey], node.memory[self.pathLengthKey]]))
 
+
                 unvisited = list(node.memory[self.neighborsKey])
+                print "INITIATOR_____________________________________"
+                print node.memory[self.childrenKey]
+                print unvisited
                 for child in node.memory[self.childrenKey]:
                     unvisited.remove(child)
 
@@ -75,12 +92,52 @@ class PTConstruction(NodeAlgorithm):
 
     def idle(self, node, message):
         if message.header == 'Notify':
+            node.memory[self.macroIterationKey] = message.data
             unvisited = list(node.memory[self.neighborsKey])
             unvisited.remove(message.source)
             node.memory[self.unvisitedKey] = unvisited
             node.send(Message(header='Ack',
                               destination=message.source))
             node.status = 'AWAKE'
+
+        elif message.header == 'Token':
+            node.memory[self.macroIterationKey] = message.data
+
+            if node.memory[self.routingTableKey]:
+                if node.memory[self.tokenNeighboursKey]:
+                    tokenNeighbour = node.memory[self.tokenNeighboursKey][0]
+                    node.memory[self.macroIterationKey] +=1
+                    node.send(Message(header='Token',
+                                 destination = tokenNeighbour,
+                                 data=node.memory[self.macroIterationKey]))
+                    tokenNeighbours = list(node.memory[self.tokenNeighboursKey])
+                    tokenNeighbours.remove(tokenNeighbour)
+                    node.memory[self.tokenNeighboursKey] = tokenNeighbours
+
+                else:
+                    if not node.memory[self.masterKey]:
+                        node.send(Message(header='Token',
+                                     destination = node.memory[self.parentMasterKey],
+                                     data=node.memory[self.macroIterationKey]))
+                    else:
+                        print "------------GOTOVO JE-----------------"
+                        node.send(Message(header='Done',
+                                 destination = node.memory[self.masterChildrenKey]))
+                        node.status = 'DONE'
+
+            else:
+                node.send(Message(header=NodeAlgorithm.INI,
+                              destination=node))
+
+                node.status = 'INITIATOR'
+
+        elif message.header == 'Done':
+            node.send(Message(header='Done',
+                             destination = node.memory[self.masterChildrenKey]))
+            node.status = 'DONE'
+
+
+
 
 
 
@@ -133,6 +190,7 @@ class PTConstruction(NodeAlgorithm):
                         node.memory[self.unvisitedKey] = unvisited
 
         elif message.header == 'Notify':
+            node.memory[self.macroIterationKey] = message.data
             unvisited = list(node.memory[self.unvisitedKey])
             unvisited.remove(message.source)
             node.memory[self.unvisitedKey] = unvisited
@@ -142,7 +200,10 @@ class PTConstruction(NodeAlgorithm):
         elif message.header == 'Terminate':
             node.send(Message(header='Terminate',
                               destination =node.memory[self.childrenKey]))
-            node.status = 'DONE'
+
+            self.initializeVariables(node)
+            print "prelazi u idle"
+            node.status = 'IDLE'
 
 
     def awake(self, node, message):
@@ -154,7 +215,8 @@ class PTConstruction(NodeAlgorithm):
                 destination = list(node.memory[self.neighborsKey])
                 destination.remove(message.source)
                 node.send(Message(header='Notify',
-                                  destination=destination))
+                                  destination=destination,
+                                  data=node.memory[self.macroIterationKey]))
                 node.memory[self.ackCountKey] = len(node.memory[self.neighborsKey])-1
                 node.status = 'WAITING_FOR_ACK'
 
@@ -166,6 +228,7 @@ class PTConstruction(NodeAlgorithm):
                 node.status = 'ACTIVE'
 
         elif message.header == 'Notify':
+            node.memory[self.macroIterationKey] = message.data
             unvisited = list(node.memory[self.unvisitedKey])
             unvisited.remove(message.source)
             node.memory[self.unvisitedKey] = unvisited
@@ -221,7 +284,32 @@ class PTConstruction(NodeAlgorithm):
         if node.memory[self.minPathKey] == float("inf"):
             node.send(Message(header='Terminate',
                              destination = node.memory[self.childrenKey]))
-            node.status = 'DONE'
+            
+            self.initializeVariables(node)
+
+            if node.memory[self.tokenNeighboursKey]:
+                tokenNeighbour = node.memory[self.tokenNeighboursKey][0]
+                node.memory[self.macroIterationKey] +=1
+                node.send(Message(header='Token',
+                             destination = tokenNeighbour,
+                             data=node.memory[self.macroIterationKey]))
+                tokenNeighbours = list(node.memory[self.tokenNeighboursKey])
+                tokenNeighbours.remove(tokenNeighbour)
+                node.memory[self.tokenNeighboursKey] = tokenNeighbours
+
+            else:
+                if not node.memory[self.masterKey]:
+                    node.send(Message(header='Token',
+                                 destination = node.memory[self.parentMasterKey],
+                                 data=node.memory[self.macroIterationKey]))
+                else:
+                    print "------------GOTOVO JE-----------------"
+
+            node.status = 'IDLE'
+        
+
+
+
         else:
             if (node.memory[self.exitKey] == node.memory[self.myChoiceKey]):
                 children = list(node.memory[self.childrenKey])
@@ -240,6 +328,21 @@ class PTConstruction(NodeAlgorithm):
             node.status = 'ACTIVE'
 
 
+    def initializeVariables(self, node):
+        if node.memory[self.macroIterationKey] == 0:
+            node.memory[self.masterChildrenKey] = node.memory[self.childrenKey]
+            node.memory[self.tokenNeighboursKey] = node.memory[self.childrenKey]
+            node.memory[self.parentMasterKey] = node.memory[self.parentKey]
+        node.memory[self.childrenKey] = []
+        node.memory[self.exitKey] = None
+        node.memory[self.myChoiceKey] = None
+        node.memory[self.minPathKey] = float('inf')
+        node.memory[self.unvisitedKey] = []
+        node.memory[self.myDistanceKey] = None
+        node.memory[self.pathLengthKey] = None
+        node.memory[self.childCountKey] = None
+        node.memory[self.sourceKey] = False
+        node.memory[self.parentKey] = None
 
 
     STATUS = {
