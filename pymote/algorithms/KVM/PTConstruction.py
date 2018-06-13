@@ -74,7 +74,7 @@ class PTConstruction(NodeAlgorithm):
             #brojac za ack poruke
             node.memory[self.ackCountKey] -= 1
 
-            #ako su primnjene ack poruke od svih susjeda, brojac je 0
+            #ako su primljene ack poruke od svih susjeda, brojac je 0
             if node.memory[self.ackCountKey] == 0:
                 node.memory[self.iterationKey] = 1
                 #odaberi najblizeg susjeda
@@ -122,14 +122,14 @@ class PTConstruction(NodeAlgorithm):
                     tokenNeighbours = list(node.memory[self.tokenNeighboursKey])
                     tokenNeighbours.remove(tokenNeighbour)
                     node.memory[self.tokenNeighboursKey] = tokenNeighbours
-
+                #ako si poslao svoj djeci token
                 else:
-                    #ako si poslao svoj djeci token i nisi master salji token roditelju
+                    #ako nisi master salji token roditelju
                     if not node.memory[self.masterKey]:
                         node.send(Message(header='Token',
                                      destination = node.memory[self.parentMasterKey],
                                      data=node.memory[self.macroIterationKey]))
-                    #ako si master i poslao si svoj djeci, algoritam je gotov i broadcasta se poruka o zavrsetku algoritma
+                    #ako si master, algoritam je gotov i broadcasta se poruka o zavrsetku algoritma
                     else:
                         node.send(Message(header='Done',
                                  destination = node.memory[self.masterChildrenKey]))
@@ -156,14 +156,22 @@ class PTConstruction(NodeAlgorithm):
         if message.header == 'IterationCompleted':
             self.messageCounter += 1
 
+            #dodaj sebe na pocetak routing liste
             routingList=list(message.data)
             routingList.insert(0, node)
+
+            #ako nisi incijator
             if not(node.memory[self.sourceKey]):
+                #posalji IterationCompleted roditelju, u poruci mu posalji azuriranu routing listu
                 node.send(Message(header='IterationCompleted',
                                   destination = node.memory[self.parentKey],
                                   data = routingList))
+            #ako si inicijator
             else:
+                #zapisi u routing tablici dobivenu routing listu za zadnji cvor
                 node.memory[self.routingTableKey][message.data[-1]] = message.data
+
+                #zapocni novu iteraciju, posalji poruku svoj djeci, azuriraj min, postavi counter djece na 0
                 node.memory[self.iterationKey] +=1
                 node.send(Message(header='StartIteration',
                                   destination = node.memory[self.childrenKey],
@@ -175,13 +183,18 @@ class PTConstruction(NodeAlgorithm):
         elif message.header == 'StartIteration':
             self.messageCounter += 1
 
+            #zapisi broj iteracije i izracunaj min
             node.memory[self.iterationKey] = message.data
             self.computeLocalMinimum(node)
+            #ako nemas djece
             if not node.memory[self.childrenKey]:
+                #posalji roditelju min
                 node.send(Message(header='MinValue',
                                   destination = node.memory[self.parentKey],
                                   data = node.memory[self.minPathKey]))
+            #ako imas djece
             else:
+                #zapocni novu iteraciju, posalji poruku svoj djeci, i postavi counter djece na 0
                 node.send(Message(header='StartIteration',
                                   destination = node.memory[self.childrenKey],
                                   data = node.memory[self.iterationKey]))
@@ -191,15 +204,19 @@ class PTConstruction(NodeAlgorithm):
         elif message.header == 'Expand':
             self.messageCounter += 1
 
+            #posalji Expand poruku svom exit kljucu s informacijama o broju iteracije i minimumom
             node.send(Message(header='Expand',
                               destination = node.memory[self.exitKey],
                               data = [message.data[0], message.data[1]]))
             
+            #ako su ti exit cvor i myChoice cvor jednaki
             if (node.memory[self.exitKey] == node.memory[self.myChoiceKey]) and (node.memory[self.myChoiceKey] != None):
                 children = list(node.memory[self.childrenKey]) 
+                #ako ti myChoice cvor nije u listi djece, dodaj ga
                 if node.memory[self.myChoiceKey] not in children:
                     children.append(node.memory[self.myChoiceKey])
                     node.memory[self.childrenKey] = children
+                #ako imas jos neposjecenih cvorova, provjeri ako je myChoice u neposjecenim, i ako je makni ga
                 if node.memory[self.unvisitedKey]:
                     unvisited = list(node.memory[self.unvisitedKey])
                     if node.memory[self.myChoiceKey] in unvisited:
@@ -213,6 +230,7 @@ class PTConstruction(NodeAlgorithm):
         elif message.header == 'Terminate':
             self.messageCounter += 1
 
+            #posalji poruku Terminate svojoj djeci i inicijaliziraj sve potrebne varijable
             node.send(Message(header='Terminate',
                               destination =node.memory[self.childrenKey]))
 
@@ -224,20 +242,26 @@ class PTConstruction(NodeAlgorithm):
         if message.header == 'Expand':
             self.messageCounter += 1
 
+            #postavi myDistance na dobivenu udaljenost, postavi posiljatelja poruke za roditelja
             node.memory[self.myDistanceKey] = message.data[1]
             node.memory[self.parentKey] = message.source
             node.memory[self.childrenKey] = []
+            #ako nisi list
             if len(node.memory[self.neighborsKey])>1:
+                #posalji svim susjedima osim roditelju Notify poruku s informacijom o trenutnoj macro iteraciji
                 destination = list(node.memory[self.neighborsKey])
                 destination.remove(message.source)
                 node.send(Message(header='Notify',
                                   destination=destination,
                                   data=node.memory[self.macroIterationKey]))
+                #postavi ack brojac i prijedji u stanje WAITING_FOR_ACK
                 node.memory[self.ackCountKey] = len(node.memory[self.neighborsKey])-1
                 node.status = 'WAITING_FOR_ACK'
-
+            #ako si list
             else:
+                #dodaj sebe u routing listu
                 routingList = [node]
+                #obavijesti roditelja o zavrsetku iteracije i posalji mu routing listu
                 node.send(Message(header='IterationCompleted',
                                   destination = node.memory[self.parentKey],
                                   data = routingList))
@@ -251,9 +275,11 @@ class PTConstruction(NodeAlgorithm):
     def waitingForAck(self, node, message):
         if message.header == 'Ack':
             self.messageCounter += 1
-
+            #svaki put kada primis Ack poruku umanji brojac
             node.memory[self.ackCountKey] -=1
+            #ako si primio Ack od sve djece
             if node.memory[self.ackCountKey] == 0:
+                #dodaj sebe u routing listu i posalji roditelju, predji u status ACTIVE
                 routingList = [node]
                 node.send(Message(header='IterationCompleted',
                                     destination = node.memory[self.parentKey],
@@ -265,16 +291,23 @@ class PTConstruction(NodeAlgorithm):
         if message.header == 'MinValue':
             self.messageCounter += 1
 
-            if message.data < node.memory[self.minPathKey]: 
+            #ako je minimum od posiljatelja manji od tvog trenutnog minimuma
+            if message.data < node.memory[self.minPathKey]:
+                #azuriraj vrijednosti minimuma i exit kljuca
                 node.memory[self.minPathKey] = message.data
                 node.memory[self.exitKey] = message.source
+            #inkrementiraj brojac djece
             node.memory[self.childCountKey] +=1
+            #ako si dobio poruku od sve djece
             if node.memory[self.childCountKey] == len(node.memory[self.childrenKey]):
+                #ako nisi inicijator
                 if not(node.memory[self.sourceKey]):
+                    #posalji minimum roditelju i prijedji u status ACTIVE
                     node.send(Message(header='MinValue',
                                       destination = node.memory[self.parentKey],
                                       data = node.memory[self.minPathKey]))
                     node.status = 'ACTIVE'
+                #ako si inicijator provjeri mogucnost terminacije
                 else:
                     self.checkForTermination(node)
 
@@ -282,29 +315,40 @@ class PTConstruction(NodeAlgorithm):
         pass
 
     def computeLocalMinimum(self, node):
+        #ako nemas neposjecenih cvorova, postavi min na infinity
         if not node.memory[self.unvisitedKey]:
             node.memory[self.minPathKey] = float("inf")
+        #ako imas neposjecenih cvorova
         else:
+            #pronadji najblizeg susjeda i tezinu brida do njega
             minUnvisNeighbourNode = list(node.memory[self.unvisitedKey])[0]  
             minUnvisNeighbourValue = node.memory[self.weightKey][minUnvisNeighbourNode]
             for n in node.memory[self.unvisitedKey]:
                 if node.memory[self.weightKey][n] < minUnvisNeighbourValue:
                     minUnvisNeighbourNode = n
                     minUnvisNeighbourValue = node.memory[self.weightKey][n]
+            #izracunaj svoj minimum tako da zbrojis trenutnu udaljenost s udaljenosti od najblizeg susjedom
             node.memory[self.minPathKey] = node.memory[self.myDistanceKey] + minUnvisNeighbourValue
+            #zapisi najblizeg susjeda u myChoice i exit
             node.memory[self.myChoiceKey] = minUnvisNeighbourNode
             node.memory[self.exitKey] = minUnvisNeighbourNode
 
 
     def checkForTermination(self, node):
+        #ako ti je u min zapisan infinity
         if node.memory[self.minPathKey] == float("inf"):
+            #posalji Terminate poruku svoj djeci i incijaliziraj potrebne varijable
             node.send(Message(header='Terminate',
                              destination = node.memory[self.childrenKey]))
             
             self.initializeVariables(node)
 
+            #ako imas susjeda kojima nisi poslao Token
             if node.memory[self.tokenNeighboursKey]:
+                #uzmi prvog susjeda kojem nisi poslao Token
                 tokenNeighbour = node.memory[self.tokenNeighboursKey][0]
+
+                #povecaj brojac makro iteracije, posalji Token odabranom susjedu i makni ga iz liste
                 node.memory[self.macroIterationKey] +=1
                 node.send(Message(header='Token',
                              destination = tokenNeighbour,
@@ -312,8 +356,9 @@ class PTConstruction(NodeAlgorithm):
                 tokenNeighbours = list(node.memory[self.tokenNeighboursKey])
                 tokenNeighbours.remove(tokenNeighbour)
                 node.memory[self.tokenNeighboursKey] = tokenNeighbours
-
+            #ako je svima poslan Token
             else:
+                #ako nisi master posalji Token roditelju s informacijom o makroiteraciji
                 if not node.memory[self.masterKey]:
                     node.send(Message(header='Token',
                                  destination = node.memory[self.parentMasterKey],
@@ -322,17 +367,21 @@ class PTConstruction(NodeAlgorithm):
             node.status = 'IDLE'
         
         else:
+            #ako su ti exit i myChoice isti cvor
             if (node.memory[self.exitKey] == node.memory[self.myChoiceKey]):
+                #ako ti exit nije u listi djece, dodaj ga
                 children = list(node.memory[self.childrenKey])
                 if node.memory[self.exitKey] not in children:
                     children.append(node.memory[self.exitKey])
                 node.memory[self.childrenKey] = children
 
+                #ako ti je exit u listi neposjecenih cvorova, makni ga
                 unvisited = list(node.memory[self.unvisitedKey])
                 if node.memory[self.exitKey] in unvisited:
                     unvisited.remove(node.memory[self.exitKey])
                 node.memory[self.unvisitedKey] = unvisited
 
+            #posalji Expand poruku svom exit cvoru s informacijama o trenutnoj iteracij i minimumom
             node.send(Message(header='Expand',
                               destination = node.memory[self.exitKey],
                               data = [node.memory[self.iterationKey], node.memory[self.minPathKey]]))
@@ -340,12 +389,14 @@ class PTConstruction(NodeAlgorithm):
 
 
     def initializeVariables(self, node, macro=True):
-
+        #ako nije pocetna inicijalizacija algoritma
         if macro:
+            #samo ako je prva makroiteracija postavi master varijable
             if node.memory[self.macroIterationKey] == 0:
                 node.memory[self.masterChildrenKey] = node.memory[self.childrenKey]
                 node.memory[self.tokenNeighboursKey] = node.memory[self.childrenKey]
                 node.memory[self.parentMasterKey] = node.memory[self.parentKey]
+        #inicijaliziraj varijable za sve cvorove (pocetna inicijalizacija algoritma)
         else:
             node.memory[self.masterKey] = False
             node.memory[self.routingTableKey] = dict()
@@ -354,6 +405,7 @@ class PTConstruction(NodeAlgorithm):
             node.memory[self.macroIterationKey] = 0
             node.memory[self.parentMasterKey] = None
 
+        #resetiraj sve varijable za novu makroiteraciju
         node.memory[self.childrenKey] = []
         node.memory[self.exitKey] = None
         node.memory[self.myChoiceKey] = None
@@ -366,17 +418,20 @@ class PTConstruction(NodeAlgorithm):
         node.memory[self.parentKey] = None
 
     def processNotify(self, node, message, idle=False):
+        #postavi broj trenutne makroiteracije
         node.memory[self.macroIterationKey] = message.data
+        # ako nisi idle, lista neposjecenih cvorova je trenutna, ako jesi idle onda su svi susjedi neposjeceni
         if not idle:
             unvisited = list(node.memory[self.unvisitedKey])
         else:
             unvisited = list(node.memory[self.neighborsKey])
+        #makni posiljatelja poruke iz neposjecenih i posalji mu ack poruku
         unvisited.remove(message.source)
         node.memory[self.unvisitedKey] = unvisited
         node.send(Message(header='Ack',
                           destination = message.source))
 
-
+    #mapiranje svih stanja s odgovarajucim metodama
     STATUS = {
         'INITIATOR': initiator,
         'IDLE': idle,
