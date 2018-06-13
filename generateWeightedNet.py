@@ -6,24 +6,8 @@ from pymote.network import Network
 import networkx as nx
 import random
 
-#G = nx.gnm_random_graph(5,5)
-#net_gen = NetworkGenerator(5)
-#net = net_gen.generate_random_network()
-#net = Network()
-
-net_gen = NetworkGenerator(7)
+net_gen = NetworkGenerator(6)
 net = net_gen.generate_random_network()
-
-"""
-net.add_weighted_edges_from([(net.nodes()[0],net.nodes()[1],{'weight':0.6}), (net.nodes()[2],net.nodes()[1],{'weight':0.6}), (net.nodes()[0],net.nodes()[2],{'weight':0.6})])
-net.add_weighted_edges_from([net.nodes()])
-
-for u,v,d in net.edges(data=True):
-    d['weight'] = random.randint(0,10)
-    print u, v, d
-    u.memory['weight'] = d['weight']
-    v.memory['weight'] = d['weight']
-"""
 
 net.algorithms = (PTConstruction,)
 net.show()
@@ -36,6 +20,20 @@ sim.run()
 print "\n"
 for node in net.nodes():
     print node.id, node.memory, node.status
+    print " "
 #sim.reset()
 
+tmpPathList = []
+resultCounter = 0
+for node in net.nodes():
+    for node2 in net.nodes():
+        if not node == node2:
+            tmpPathList = [p for p in nx.all_shortest_paths(net,source=node,target=node2, weight='weight')]
+            shortestPath = node.memory['routingTable'][node2]
+            for l in tmpPathList:
+                l.remove(node)
+            if shortestPath not in tmpPathList:
+                resultCounter += 1
+
+print "\nERRORS: " + str(resultCounter)
 print "\nDone script."
