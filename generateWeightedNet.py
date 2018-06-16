@@ -1,4 +1,5 @@
 from pymote.algorithms.KVM.PTConstruction import PTConstruction
+from pymote.algorithms.KVM.MinHopRouting import MinHopRouting
 from pymote.networkgenerator import NetworkGenerator
 from pymote.npickle import write_pickle
 from pymote.simulation import Simulation
@@ -9,7 +10,7 @@ import random
 #generiraj random mrezu, dodaj PTConstruction algoritam i prikazi mrezu
 net_gen = NetworkGenerator(6)
 net = net_gen.generate_random_network()
-net.algorithms = (PTConstruction,)
+net.algorithms = (MinHopRouting,)
 net.show()
 
 #zapisi mrezu
@@ -25,6 +26,8 @@ for node in net.nodes():
     print node.id, node.memory, node.status
     print " "
 #sim.reset()
+
+"""
 
 #inicijaliziraj tmp routing listu, i postavi brojac greski na 0
 tmpPathList = []
@@ -48,3 +51,5 @@ for node in net.nodes():
 #ispisi broj gresaka i obavijesti o zavrsetku algoritma
 print "\nERRORS: " + str(errorResultCounter)
 print "\nDone script."
+
+"""

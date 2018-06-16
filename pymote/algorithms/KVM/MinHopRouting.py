@@ -10,7 +10,8 @@ class MinHopRouting(NodeAlgorithm):
     default_params = {'neighborsKey': 'Neighbors', 'sourceKey': 'source', 'myDistanceKey': 'myDistance', 'ackCountKey': 'ackCount', 
                       'iterationKey': 'iteration', 'childrenKey': 'children', 'activeChildrenKey': 'activeChildren', 'unvisitedKey': 'unvisited',
                       'parentKey': 'parent', 'iterationCompletedCounterKey':'iterationCompletedCounter', 'terminateCouterKey': 'terminateCouter',
-                      'routingTableKey': 'routingTable', 'routingListKey': 'routingList'}
+                      'routingTableKey': 'routingTable', 'routingListKey': 'routingList', 'masterKey': 'master', 'macroIterationKey': 'macroIteration',
+                      'masterChildrenKey': 'masterChildren', 'masterParentKey': 'masterParent', 'tokenNeighboursKey': 'tokenNeighbours'}
 
 
     def initializer(self):
@@ -20,19 +21,27 @@ class MinHopRouting(NodeAlgorithm):
             node.memory[self.neighborsKey] = \
                 node.compositeSensor.read()['Neighbors']
             node.memory[self.sourceKey] = False
+            node.memory[self.masterKey] = False
             node.memory[self.myDistanceKey] = 0
             node.memory[self.childrenKey] = []
+            node.memory[self.masterChildrenKey] = []
+            node.memory[self.parentKey] = None
+            node.memory[self.masterParentKey] = None
             node.memory[self.activeChildrenKey] = []
             node.memory[self.iterationCompletedCounterKey] = 0
             node.memory[self.terminateCouterKey] = 0
+            node.memory[self.macroIterationKey] = -1
             node.memory[self.unvisitedKey] = []
-
+            node.memory[self.tokenNeighboursKey] = []
             node.memory[self.routingTableKey] = dict()
             node.memory[self.routingListKey] = []
+            node.memory[self.ackCountKey] = 0
             node.status = 'IDLE'
 
         ini_node.status = 'INITIATOR'
-             
+        ini_node.memory[self.masterKey] = True
+        ini_node.memory[self.macroIterationKey] = 0
+
         self.network.outbox.insert(0, Message(header=NodeAlgorithm.INI,destination=ini_node))
 
 
@@ -42,10 +51,10 @@ class MinHopRouting(NodeAlgorithm):
             node.memory[self.unvisitedKey] = node.memory[self.neighborsKey]
             node.memory[self.ackCountKey] = len(node.memory[self.neighborsKey])
             node.send(Message(header='Explore',
-                              data=1,
+                              data=[1, node.memory[self.macroIterationKey]],
                               destination=node.memory[self.neighborsKey]))
 
-        elif message.header == "Ack":
+        elif message.header == "Ack" and message.data[0] == 'Positive':
             #count received responses from neighbors
             node.memory[self.ackCountKey] -= 1
 
@@ -81,28 +90,73 @@ class MinHopRouting(NodeAlgorithm):
 
         if message.header == 'Explore':
             #initialize unvisited array for all nodes (except initiator)
-            node.memory[self.unvisitedKey] = node.memory[self.neighborsKey]
+            if node.memory[self.macroIterationKey] < message.data[1]:
 
-            #save distance 
-            node.memory[self.myDistanceKey] = message.data
+                node.memory[self.unvisitedKey] = node.memory[self.neighborsKey]
 
-            #mark sender as parent
-            node.memory[self.parentKey] = message.source
+                #save distance 
+                node.memory[self.myDistanceKey] = message.data[0]
 
-            #remove visited node (source) from unvisited list
-            unvisited = list(node.memory[self.unvisitedKey])
-            unvisited.remove(message.source)
-            node.memory[self.unvisitedKey] = unvisited
+                #save macroiteration
+                node.memory[self.macroIterationKey] = message.data[1]
 
-            #initialize ack counter for all nodes (except initiator)
-            node.memory[self.ackCountKey] = len(unvisited)
+                #mark sender as parent
+                node.memory[self.parentKey] = message.source
 
-            #send positive ack to parent
-            node.send(Message(header='Ack',
-                             data=['Positive', message.data],
-                             destination=node.memory[self.parentKey]))
+                #remove visited node (source) from unvisited list
+                unvisited = list(node.memory[self.unvisitedKey])
+                unvisited.remove(message.source)
+                node.memory[self.unvisitedKey] = unvisited
 
-            node.status = 'ACTIVE'
+                #initialize ack counter for all nodes (except initiator)
+                node.memory[self.ackCountKey] = len(unvisited)
+
+                #send positive ack to parent
+                node.send(Message(header='Ack',
+                                 data=['Positive', message.data[0]],
+                                 destination=node.memory[self.parentKey]))
+
+                node.status = 'ACTIVE'
+
+            else:
+                node.send(Message(header='Ack',
+                                 data=['Negative', message.data[0]],
+                                 destination=message.source))
+
+
+        elif message.header == 'Token':
+            if not node.memory[self.routingTableKey]:
+                node.memory[self.macroIterationKey] = message.data+1
+                node.send(Message(header=NodeAlgorithm.INI,
+                              destination=node))
+                node.status = 'INITIATOR'
+
+            else:
+                if node.memory[self.tokenNeighboursKey]:
+                    node.memory[self.macroIterationKey]+=1
+                    tokenNeighbour = node.memory[self.tokenNeighboursKey][0]
+                    node.send(Message(header='Token',
+                                  data=node.memory[self.macroIterationKey],
+                                  destination=tokenNeighbour))
+                    tokenNeighbours = list(node.memory[self.tokenNeighboursKey])
+                    tokenNeighbours.remove(tokenNeighbour)
+                    node.memory[self.tokenNeighboursKey] = tokenNeighbours
+                else:
+                    if not node.memory[self.masterKey]:
+                        node.send(Message(header='Token',
+                                  data=node.memory[self.macroIterationKey],
+                                  destination=node.memory[self.masterParentKey]))
+                    else:
+                        node.send(Message(header='Done',
+                                  destination=node.memory[self.masterChildrenKey]))
+                        node.status = "DONE"
+
+
+        elif message.header == 'Done':
+            node.send(Message(header='Done',
+                             destination=node.memory[self.masterChildrenKey]))
+            node.status = 'DONE'
+
 
 
     def active(self, node, message):
@@ -182,20 +236,13 @@ class MinHopRouting(NodeAlgorithm):
         
             if ( ((node.memory[self.myDistanceKey] <= (message.data - 1)) and (node.memory[self.myDistanceKey] != 0) ) ):
                 
-                destination = []
-
-                if unvisited:
-                    for n in unvisited:
-                        if (n.memory[self.myDistanceKey] == 0):
-                            destination.append(n)
-
-                    node.memory[self.unvisitedKey] = destination
-                    node.memory[self.ackCountKey] = len(destination)
+                destination = node.memory[self.unvisitedKey]
+                node.memory[self.ackCountKey] = len(destination)
 
                 if destination:
                     #node.memory[self.ackCountKey] = len(unvisited)
                     node.send(Message(header='Explore',
-                                      data=message.data, 
+                                      data=[message.data, node.memory[self.macroIterationKey]], 
                                       destination=destination))
                 elif activeChildren:
                     node.send(Message(header='Start Iteration',
@@ -205,7 +252,25 @@ class MinHopRouting(NodeAlgorithm):
                     node.send(Message(header='Terminate',
                                   data=message.data,
                                   destination=node.memory[self.parentKey]))
-                    node.status = 'DONE'
+                    
+                    if node.memory[self.macroIterationKey] == 0:
+                        node.memory[self.masterChildrenKey] = node.memory[self.childrenKey]
+                        node.memory[self.masterParentKey] = node.memory[self.parentKey]
+                        node.memory[self.tokenNeighboursKey] = node.memory[self.childrenKey]
+                    node.memory[self.sourceKey] = False
+                    node.memory[self.myDistanceKey] = 0
+                    node.memory[self.childrenKey] = []
+                    node.memory[self.parentKey] = None
+                    node.memory[self.activeChildrenKey] = []
+                    node.memory[self.iterationCompletedCounterKey] = 0
+                    node.memory[self.terminateCouterKey] = 0
+                    node.memory[self.unvisitedKey] = []
+                    node.memory[self.routingListKey] = []
+                    node.memory[self.ackCountKey] = 0
+
+                    node.status = 'IDLE'
+
+                    
 
             else:
                 #set distance to message data
@@ -226,19 +291,15 @@ class MinHopRouting(NodeAlgorithm):
 
             #if node distance is already calculated, he is already in tree
             if ( node.memory[self.myDistanceKey] != 0 ):
-                #unvisited = list(node.memory[self.unvisitedKey])
-                #activeChildren = list(node.memory[self.activeChildrenKey])
-                #node.memory[self.ackCountKey] = len(unvisited)
-
                 #send negative ack to parent
                 node.send(Message(header='Ack',
-                                  data=['Negative', message.data],
+                                  data=['Negative', message.data[0]],
                                   destination=message.source))
             
             #if node not in tree (first next neighbor)
             else:
                 #set distance to message data
-                node.memory[self.myDistanceKey] = message.data
+                node.memory[self.myDistanceKey] = message.data[0]
                 #set parent to message source
                 node.memory[self.parentKey] = message.source
 
@@ -246,7 +307,7 @@ class MinHopRouting(NodeAlgorithm):
 
                 #send positive ack to parent
                 node.send(Message(header='Ack',
-                                  data=['Positive', message.data],
+                                  data=['Positive', message.data[0]],
                                   destination=node.memory[self.parentKey]))
 
         if message.header == 'Terminate':
@@ -263,7 +324,7 @@ class MinHopRouting(NodeAlgorithm):
                 
                 if not node.memory[self.sourceKey]:
                     node.send(Message(header='Iteration Completed',
-                                  data=message.data, #proslijedi br iteracije (distance)
+                                  data=[message.data, node.memory[self.routingListKey]], #proslijedi br iteracije (distance)
                                   destination=node.memory[self.parentKey]))
                 else:
                     node.send(Message(header='Start Iteration',
@@ -271,12 +332,73 @@ class MinHopRouting(NodeAlgorithm):
                                   destination=node.memory[self.activeChildrenKey]))                    
 
             children = list(node.memory[self.childrenKey])
+            ##kad si dobio sve terminate
             if node.memory[self.terminateCouterKey] == len(children):
+                #ako nisi source
                 if not node.memory[self.sourceKey]:
                     node.send(Message(header='Terminate',
                                       data=message.data,
                                       destination=node.memory[self.parentKey]))
-                node.status = 'DONE'
+
+                    if node.memory[self.macroIterationKey] == 0:
+                        node.memory[self.masterChildrenKey] = node.memory[self.childrenKey]
+                        node.memory[self.masterParentKey] = node.memory[self.parentKey]
+                        node.memory[self.tokenNeighboursKey] = node.memory[self.childrenKey]
+                    node.memory[self.sourceKey] = False
+                    node.memory[self.myDistanceKey] = 0
+                    node.memory[self.childrenKey] = []
+                    node.memory[self.parentKey] = None
+                    node.memory[self.activeChildrenKey] = []
+                    node.memory[self.iterationCompletedCounterKey] = 0
+                    node.memory[self.terminateCouterKey] = 0
+                    node.memory[self.unvisitedKey] = []
+                    node.memory[self.routingListKey] = []
+                    node.memory[self.ackCountKey] = 0
+
+                    node.status = 'IDLE'
+                #ako si source
+                else:
+                    if node.memory[self.macroIterationKey] == 0:
+                        node.memory[self.masterChildrenKey] = node.memory[self.childrenKey]
+                        node.memory[self.masterParentKey] = node.memory[self.parentKey]
+                        node.memory[self.tokenNeighboursKey] = node.memory[self.childrenKey]
+                    node.memory[self.sourceKey] = False
+                    node.memory[self.myDistanceKey] = 0
+                    node.memory[self.childrenKey] = []
+                    node.memory[self.parentKey] = None
+                    node.memory[self.activeChildrenKey] = []
+                    node.memory[self.iterationCompletedCounterKey] = 0
+                    node.memory[self.terminateCouterKey] = 0
+                    node.memory[self.unvisitedKey] = []
+                    node.memory[self.routingListKey] = []
+                    node.memory[self.ackCountKey] = 0
+
+
+                    if node.memory[self.tokenNeighboursKey]:
+                        tokenNeighbour = node.memory[self.tokenNeighboursKey][0]
+                        node.send(Message(header='Token',
+                                      data=node.memory[self.macroIterationKey],
+                                      destination=tokenNeighbour))
+                        tokenNeighbours = list(node.memory[self.tokenNeighboursKey])
+                        tokenNeighbours.remove(tokenNeighbour)
+                        node.memory[self.tokenNeighboursKey] = tokenNeighbours
+                        node.status = 'IDLE'
+
+                    else:
+                        if not node.memory[self.masterKey]:
+                            node.send(Message(header='Token',
+                                      data=node.memory[self.macroIterationKey],
+                                      destination=node.memory[self.masterParentKey]))
+                            node.status = 'IDLE'
+
+                        else:
+                            node.send(Message(header='Done',
+                                      destination=node.memory[self.masterChildrenKey]))
+                            node.status='DONE'
+
+
+
+               
 
 
     def done(self, node, message):
