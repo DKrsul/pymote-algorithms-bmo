@@ -27,7 +27,6 @@ for node in net.nodes():
     print " "
 #sim.reset()
 
-"""
 
 #inicijaliziraj tmp routing listu, i postavi brojac greski na 0
 tmpPathList = []
@@ -51,5 +50,3 @@ for node in net.nodes():
 #ispisi broj gresaka i obavijesti o zavrsetku algoritma
 print "\nERRORS: " + str(errorResultCounter)
 print "\nDone script."
-
-"""
