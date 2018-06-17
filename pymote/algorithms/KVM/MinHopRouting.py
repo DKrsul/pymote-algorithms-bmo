@@ -20,22 +20,7 @@ class MinHopRouting(NodeAlgorithm):
         for node in self.network.nodes():
             node.memory[self.neighborsKey] = \
                 node.compositeSensor.read()['Neighbors']
-            node.memory[self.sourceKey] = False
-            node.memory[self.masterKey] = False
-            node.memory[self.myDistanceKey] = 0
-            node.memory[self.childrenKey] = []
-            node.memory[self.masterChildrenKey] = []
-            node.memory[self.parentKey] = None
-            node.memory[self.masterParentKey] = None
-            node.memory[self.activeChildrenKey] = []
-            node.memory[self.iterationCompletedCounterKey] = 0
-            node.memory[self.terminateCouterKey] = 0
-            node.memory[self.macroIterationKey] = -1
-            node.memory[self.unvisitedKey] = []
-            node.memory[self.tokenNeighboursKey] = []
-            node.memory[self.routingTableKey] = dict()
-            node.memory[self.routingListKey] = []
-            node.memory[self.ackCountKey] = 0
+            self.initializeVariables(node, False)
             node.status = 'IDLE'
 
         #set initiator variables
@@ -266,23 +251,7 @@ class MinHopRouting(NodeAlgorithm):
                                   data=message.data,
                                   destination=node.memory[self.parentKey]))
 
-                    #if this iteration is first
-                    if node.memory[self.macroIterationKey] == 0:
-                        #set master variables
-                        node.memory[self.masterChildrenKey] = node.memory[self.childrenKey]
-                        node.memory[self.masterParentKey] = node.memory[self.parentKey]
-                        node.memory[self.tokenNeighboursKey] = node.memory[self.childrenKey]
-                    #reset other variables
-                    node.memory[self.sourceKey] = False
-                    node.memory[self.myDistanceKey] = 0
-                    node.memory[self.childrenKey] = []
-                    node.memory[self.parentKey] = None
-                    node.memory[self.activeChildrenKey] = []
-                    node.memory[self.iterationCompletedCounterKey] = 0
-                    node.memory[self.terminateCouterKey] = 0
-                    node.memory[self.unvisitedKey] = []
-                    node.memory[self.routingListKey] = []
-                    node.memory[self.ackCountKey] = 0
+                    self.initializeVariables(node)
 
                     node.status = 'IDLE'
             else:
@@ -345,44 +314,14 @@ class MinHopRouting(NodeAlgorithm):
                     node.send(Message(header='Terminate',
                                       data=message.data,
                                       destination=node.memory[self.parentKey]))
-                    #if this is first iteration
-                    if node.memory[self.macroIterationKey] == 0:
-                        #set master variables
-                        node.memory[self.masterChildrenKey] = node.memory[self.childrenKey]
-                        node.memory[self.masterParentKey] = node.memory[self.parentKey]
-                        node.memory[self.tokenNeighboursKey] = node.memory[self.childrenKey]
-                    #reset other variables
-                    node.memory[self.sourceKey] = False
-                    node.memory[self.myDistanceKey] = 0
-                    node.memory[self.childrenKey] = []
-                    node.memory[self.parentKey] = None
-                    node.memory[self.activeChildrenKey] = []
-                    node.memory[self.iterationCompletedCounterKey] = 0
-                    node.memory[self.terminateCouterKey] = 0
-                    node.memory[self.unvisitedKey] = []
-                    node.memory[self.routingListKey] = []
-                    node.memory[self.ackCountKey] = 0
+                    
+                    self.initializeVariables(node)
 
                     node.status = 'IDLE'
                 #if node is initator
                 else:
-                    #if thisis first iteration
-                    if node.memory[self.macroIterationKey] == 0:
-                        #set master variables
-                        node.memory[self.masterChildrenKey] = node.memory[self.childrenKey]
-                        node.memory[self.masterParentKey] = node.memory[self.parentKey]
-                        node.memory[self.tokenNeighboursKey] = node.memory[self.childrenKey]
-                    #reset other variables
-                    node.memory[self.sourceKey] = False
-                    node.memory[self.myDistanceKey] = 0
-                    node.memory[self.childrenKey] = []
-                    node.memory[self.parentKey] = None
-                    node.memory[self.activeChildrenKey] = []
-                    node.memory[self.iterationCompletedCounterKey] = 0
-                    node.memory[self.terminateCouterKey] = 0
-                    node.memory[self.unvisitedKey] = []
-                    node.memory[self.routingListKey] = []
-                    node.memory[self.ackCountKey] = 0
+                    self.initializeVariables(node)
+
                     #if token neighbours are set
                     if node.memory[self.tokenNeighboursKey]:
                         #save first token neighbour
@@ -413,7 +352,42 @@ class MinHopRouting(NodeAlgorithm):
 
     def done(self, node, message):
         pass
+
+    def initializeVariables(self, node, macro=True): 
+        #if it's the start of the algorithm
+        if not macro:
+            node.memory[self.masterKey] = False
+            node.memory[self.masterChildrenKey] = []
+            node.memory[self.masterParentKey] = None
+            node.memory[self.macroIterationKey] = -1
+            node.memory[self.tokenNeighboursKey] = []
+            node.memory[self.routingTableKey] = dict()
+            #if this is first iteration
+            
+        #else it's the start of new macroiteration
+        else:
+            if node.memory[self.macroIterationKey] == 0:
+                node.memory[self.masterChildrenKey] = node.memory[self.childrenKey]
+                node.memory[self.masterParentKey] = node.memory[self.parentKey]
+                node.memory[self.tokenNeighboursKey] = node.memory[self.childrenKey]
+            
+
+        #reset other variables
+        node.memory[self.sourceKey] = False
+        node.memory[self.myDistanceKey] = 0
+        node.memory[self.childrenKey] = []
+        node.memory[self.parentKey] = None
+        node.memory[self.activeChildrenKey] = []
+        node.memory[self.iterationCompletedCounterKey] = 0
+        node.memory[self.terminateCouterKey] = 0
+        node.memory[self.unvisitedKey] = []
+        node.memory[self.routingListKey] = []
+        node.memory[self.ackCountKey] = 0
     
+
+
+
+
     STATUS = {
         'INITIATOR': initiator,
         'IDLE': idle,

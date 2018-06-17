@@ -7,7 +7,7 @@ from pymote.network import Network
 import networkx as nx
 
 #generate random network
-net_gen = NetworkGenerator(5)
+net_gen = NetworkGenerator(15)
 net = net_gen.generate_random_network()
 #add MinHopRouting algorithm and show the network
 net.algorithms = (MinHopRouting,)
@@ -24,6 +24,7 @@ sim.run()
 print "\n"
 for node in net.nodes():
     print node.id, node.memory, node.status
+    print str(len(node.memory['routingTable']))
     print " "
 #sim.reset()
 
@@ -57,3 +58,4 @@ for node in net.nodes():
 #report error number
 print "\nERRORS: " + str(errorResultCounter)
 print "\nDone script."
+
